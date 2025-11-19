@@ -6,7 +6,18 @@ const router = express.Router();
 // Get all message templates
 router.get('/templates', async (req, res) => {
   try {
-    const templates = db.prepare('SELECT * FROM settings WHERE key LIKE ?').all('%message%');
+    // Get specific message templates in order
+    const templates = db.prepare(`
+      SELECT * FROM settings 
+      WHERE key IN ('initial_message', 'followup_1', 'followup_2', 'followup_3')
+      ORDER BY 
+        CASE key
+          WHEN 'initial_message' THEN 1
+          WHEN 'followup_1' THEN 2
+          WHEN 'followup_2' THEN 3
+          WHEN 'followup_3' THEN 4
+        END
+    `).all();
     res.json(templates);
   } catch (error) {
     console.error('Error fetching templates:', error);

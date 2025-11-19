@@ -1,7 +1,6 @@
 import express from 'express';
 import { loginToLinkedIn, getIsLoggedIn, closeBrowser } from '../services/linkedin-automation';
-import { sendFollowUpMessage } from '../services/automation-service';
-import { pool } from '../db/init';
+import { sendFollowUpMessage, checkAndSendFirstMessage } from '../services/automation-service';
 
 const router = express.Router();
 
@@ -53,14 +52,36 @@ router.post('/followup/:profileId', async (req, res) => {
   }
 });
 
-// Check and update connection status
+// Check and send first message for profiles waiting for connection acceptance
 router.post('/check-connections', async (req, res) => {
   try {
-    // This would check LinkedIn for accepted connections
-    // For now, we'll just return a message that this needs manual verification
-    res.json({ message: 'Connection status check - to be implemented' });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to check connections' });
+    const { profileId } = req.body;
+    
+    if (profileId) {
+      // Check specific profile
+      const result = await checkAndSendFirstMessage(parseInt(profileId));
+      res.json(result);
+    } else {
+      // Check all pending connections
+      const { db } = require('../db/init');
+      const pendingProfiles = db.prepare(`
+        SELECT id FROM profiles 
+        WHERE status = 'connection_request_sent' AND connection_accepted = 0
+      `).all() as any[];
+
+      const results = [];
+      for (const profile of pendingProfiles) {
+        try {
+          const result = await checkAndSendFirstMessage(profile.id);
+          results.push({ profileId: profile.id, ...result });
+        } catch (error: any) {
+          results.push({ profileId: profile.id, success: false, error: error.message });
+        }
+      }
+      res.json({ results });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check connections' });
   }
 });
 

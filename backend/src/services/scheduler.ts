@@ -1,14 +1,30 @@
 import cron from 'node-cron';
 import { db } from '../db/init';
-import { sendFollowUpMessage } from './automation-service';
+import { sendFollowUpMessage, checkAndSendFirstMessage } from './automation-service';
 
-// Run every hour to check for follow-ups
+// Run every hour to check for follow-ups and connection acceptances
 export function startScheduler() {
   cron.schedule('0 * * * *', async () => {
-    console.log('Running scheduled follow-up check...');
+    console.log('Running scheduled check...');
     
     try {
-      // Get profiles that need follow-up messages
+      // FIRST: Check for profiles waiting for connection acceptance to send 1st message
+      const pendingConnections = db.prepare(`
+        SELECT * FROM profiles 
+        WHERE status = 'connection_request_sent'
+          AND connection_accepted = 0
+      `).all() as any[];
+
+      for (const profile of pendingConnections) {
+        console.log(`Checking connection acceptance for profile ${profile.id}`);
+        try {
+          await checkAndSendFirstMessage(profile.id);
+        } catch (error) {
+          console.error(`Error checking connection for profile ${profile.id}:`, error);
+        }
+      }
+
+      // SECOND: Get profiles that need follow-up messages
       // SQLite uses datetime('now', '-3 days') instead of NOW() - INTERVAL '3 days'
       const profiles = db.prepare(`
         SELECT p.*, 
@@ -55,5 +71,5 @@ export function startScheduler() {
     }
   });
 
-  console.log('Scheduler started - checking for follow-ups every hour');
+  console.log('Scheduler started - checking for connection acceptances and follow-ups every hour');
 }

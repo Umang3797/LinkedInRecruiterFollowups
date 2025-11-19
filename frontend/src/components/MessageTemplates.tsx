@@ -57,10 +57,10 @@ const MessageTemplates: React.FC<MessageTemplatesProps> = ({ isOpen, onClose }) 
 
   const getTemplateLabel = (key: string) => {
     const labels: Record<string, string> = {
-      initial_message: 'Initial Message',
-      followup_1: 'First Follow-up (3 days)',
-      followup_2: 'Second Follow-up (6 days)',
-      followup_3: 'Third Follow-up (9 days)',
+      initial_message: '1st Message (Initial Message)',
+      followup_1: '2nd Follow-up (After 3 days)',
+      followup_2: '3rd Follow-up (After 6 days)',
+      followup_3: '4th Follow-up (After 9 days)',
     };
     return labels[key] || key;
   };

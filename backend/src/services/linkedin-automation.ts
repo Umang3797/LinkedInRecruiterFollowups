@@ -1,5 +1,4 @@
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
-import { pool } from '../db/init';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -68,25 +67,120 @@ export async function getProfileInfo(profileUrl: string) {
 
   try {
     await page.goto(profileUrl, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
 
-    // Extract profile information
-    const name = await page.textContent('h1.text-heading-xlarge').catch(() => null);
-    const headline = await page.textContent('.text-body-medium.break-words').catch(() => null);
-    
-    // Try to get company and position from headline or experience
+    // Try multiple selectors for name (LinkedIn changes their HTML frequently)
+    let name = null;
+    const nameSelectors = [
+      'h1.text-heading-xlarge',
+      'h1[data-anonymize="person-name"]',
+      'h1.pv-text-details__left-panel h1',
+      'h1.top-card-layout__title',
+      'h1.break-words',
+      'h1.text-heading-xlarge.inline',
+    ];
+
+    for (const selector of nameSelectors) {
+      try {
+        name = await page.textContent(selector);
+        if (name && name.trim()) {
+          name = name.trim();
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    // Try multiple selectors for headline/position
+    let headline = null;
+    const headlineSelectors = [
+      '.text-body-medium.break-words',
+      '.text-body-medium',
+      '.pv-text-details__left-panel .text-body-medium',
+      '.top-card-layout__headline',
+      '[data-anonymize="headline"]',
+    ];
+
+    for (const selector of headlineSelectors) {
+      try {
+        headline = await page.textContent(selector);
+        if (headline && headline.trim()) {
+          headline = headline.trim();
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    // Try to get company from experience section
     let company = null;
-    let position = null;
-    
-    if (headline) {
+    const companySelectors = [
+      '.pv-text-details__left-panel .text-body-small span[aria-hidden="true"]',
+      '.pv-entity__secondary-title',
+      '.experience-section .pv-entity__secondary-title',
+      '[data-section="currentPositionsDetails"] .pv-entity__secondary-title',
+    ];
+
+    for (const selector of companySelectors) {
+      try {
+        company = await page.textContent(selector);
+        if (company && company.trim()) {
+          company = company.trim();
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    // If company not found, try to extract from headline
+    if (!company && headline) {
       const parts = headline.split(' at ');
       if (parts.length > 1) {
-        position = parts[0].trim();
         company = parts[1].trim();
+      } else {
+        // Try other patterns
+        const atIndex = headline.indexOf(' at ');
+        if (atIndex > -1) {
+          company = headline.substring(atIndex + 4).trim();
+        }
+      }
+    }
+
+    // Extract position from headline
+    let position = null;
+    if (headline) {
+      if (headline.includes(' at ')) {
+        position = headline.split(' at ')[0].trim();
       } else {
         position = headline;
       }
     }
+
+    // Try to get position from experience section if not found
+    if (!position) {
+      const positionSelectors = [
+        '.pv-entity__summary-info h3',
+        '.experience-section .pv-entity__summary-info h3',
+        '[data-section="currentPositionsDetails"] .pv-entity__summary-info h3',
+      ];
+
+      for (const selector of positionSelectors) {
+        try {
+          position = await page.textContent(selector);
+          if (position && position.trim()) {
+            position = position.trim();
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+    }
+
+    console.log('Extracted profile info:', { name, company, position });
 
     return {
       name: name || null,
@@ -113,8 +207,8 @@ export async function sendConnectionRequest(profileUrl: string): Promise<boolean
     
     if (!connectButton) {
       // Check if already connected or connection sent
-      const connectedText = await page.textContent('body').catch(() => '');
-      if (connectedText.includes('Pending') || connectedText.includes('Message')) {
+      const connectedText = await page.textContent('body').catch(() => null);
+      if (connectedText && (connectedText.includes('Pending') || connectedText.includes('Message'))) {
         return true; // Already connected or request sent
       }
       return false;
@@ -201,9 +295,36 @@ export async function checkIfMessagingOpen(profileUrl: string): Promise<boolean>
     await page.waitForTimeout(2000);
 
     // Check if "Message" button is available (not grayed out)
+    // If we can message without being connected, messaging is open
     const messageButton = await page.$('button:has-text("Message"):not([disabled])').catch(() => null);
     return messageButton !== null;
   } catch (error) {
+    return false;
+  }
+}
+
+export async function checkIfConnectionAccepted(profileUrl: string): Promise<boolean> {
+  if (!page || !isLoggedIn) {
+    return false;
+  }
+
+  try {
+    await page.goto(profileUrl, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(2000);
+
+    // Check if "Message" button is now available (connection was accepted)
+    const messageButton = await page.$('button:has-text("Message"):not([disabled])').catch(() => null);
+    
+    // Also check for "Pending" status - if it says pending, connection not accepted yet
+    const pageText = await page.textContent('body').catch(() => null);
+    if (pageText && pageText.includes('Pending')) {
+      return false; // Still pending
+    }
+
+    // If message button is available, connection is likely accepted
+    return messageButton !== null;
+  } catch (error) {
+    console.error('Error checking connection status:', error);
     return false;
   }
 }
